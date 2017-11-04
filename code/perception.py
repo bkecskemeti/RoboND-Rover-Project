@@ -1,20 +1,12 @@
 import numpy as np
 import cv2
 
-# Identify pixels above the threshold
-# Threshold of RGB > 160 does a nice job of identifying ground pixels only
-def color_thresh(img, rgb_thresh=(160, 160, 160)):
-    # Create an array of zeros same xy size as img, but single channel
+# Identify pixels above and/or below given thresholds
+def color_thresh(img, lo=(0, 0, 0), hi=(255, 255, 255)):
     color_select = np.zeros_like(img[:,:,0])
-    # Require that each pixel be above all three threshold values in RGB
-    # above_thresh will now contain a boolean array with "True"
-    # where threshold was met
-    above_thresh = (img[:,:,0] > rgb_thresh[0]) \
-                & (img[:,:,1] > rgb_thresh[1]) \
-                & (img[:,:,2] > rgb_thresh[2])
-    # Index the array of zeros with the boolean array and set to 1
-    color_select[above_thresh] = 1
-    # Return the binary image
+    mask = (img[:,:,0] >= lo[0]) & (img[:,:,1] >= lo[1]) & (img[:,:,2] >= lo[2]) & \
+           (img[:,:,0] <= hi[0]) & (img[:,:,1] <= hi[1]) & (img[:,:,2] <= hi[2])
+    color_select[mask] = 1
     return color_select
 
 # Define a function to convert from image coords to rover coords
@@ -77,33 +69,66 @@ def perspect_transform(img, src, dst):
     
     return warped
 
+def get_transform(img, dst_size):
+    bottom_offset = 6
+    source = np.float32([[14, 140], [301 ,140],[200, 96], [118, 96]])
+    destination = np.float32([[img.shape[1]/2 - dst_size, img.shape[0] - bottom_offset],
+                              [img.shape[1]/2 + dst_size, img.shape[0] - bottom_offset],
+                              [img.shape[1]/2 + dst_size, img.shape[0] - 2*dst_size - bottom_offset], 
+                              [img.shape[1]/2 - dst_size, img.shape[0] - 2*dst_size - bottom_offset]])
+    return source, destination
 
 # Apply the above functions in succession and update the Rover state accordingly
 def perception_step(Rover):
-    # Perform perception steps to update Rover()
-    # TODO: 
-    # NOTE: camera image is coming to you in Rover.img
-    # 1) Define source and destination points for perspective transform
-    # 2) Apply perspective transform
-    # 3) Apply color threshold to identify navigable terrain/obstacles/rock samples
-    # 4) Update Rover.vision_image (this will be displayed on left side of screen)
-        # Example: Rover.vision_image[:,:,0] = obstacle color-thresholded binary image
-        #          Rover.vision_image[:,:,1] = rock_sample color-thresholded binary image
-        #          Rover.vision_image[:,:,2] = navigable terrain color-thresholded binary image
 
-    # 5) Convert map image pixel values to rover-centric coords
-    # 6) Convert rover-centric pixel values to world coordinates
-    # 7) Update Rover worldmap (to be displayed on right side of screen)
-        # Example: Rover.worldmap[obstacle_y_world, obstacle_x_world, 0] += 1
-        #          Rover.worldmap[rock_y_world, rock_x_world, 1] += 1
-        #          Rover.worldmap[navigable_y_world, navigable_x_world, 2] += 1
+    img = Rover.img
+    
+    dst_size = 5 
 
-    # 8) Convert rover-centric pixel positions to polar coordinates
-    # Update Rover pixel distances and angles
-        # Rover.nav_dists = rover_centric_pixel_distances
-        # Rover.nav_angles = rover_centric_angles
+    world_size, scale = Rover.worldmap.shape[0], 2 * dst_size
+
+    source, destination = get_transform(img, dst_size)
     
- 
+    # Thresholds
+    rock_thresh_lo, rock_thresh_hi = (126, 106, 0), (255, 216, 84)
+    navigable_thresh_lo = (161, 161, 161)
+
+    # Navigable terrain 
+    nav_thresh = color_thresh(img, lo=navigable_thresh_lo)
+    nav_warped = perspect_transform(nav_thresh, source, destination)
+    nav_x_rover, nav_y_rover = rover_coords(nav_warped)
+    nav_x_world, nav_y_world = pix_to_world(nav_x_rover, nav_y_rover, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
+       
+    # Obstacles 
+    obs_thresh = color_thresh(img, hi=navigable_thresh_lo)
+    obs_warped = perspect_transform(obs_thresh, source, destination)
+    obs_x_rover, obs_y_rover = rover_coords(obs_warped)
+    obs_x_world, obs_y_world = pix_to_world(obs_x_rover, obs_y_rover, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
+
+    # Rock samples
+    rock_thresh = color_thresh(img, lo=rock_thresh_lo, hi=rock_thresh_hi)
+    rock_warped = perspect_transform(rock_thresh, source, destination)
+    rock_x_rover, rock_y_rover = rover_coords(rock_warped)
+    rock_x_world, rock_y_world = pix_to_world(rock_x_rover, rock_y_rover, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
+
+    if (rock_warped.any()):
+        rock_dist, rock_ang = to_polar_coords(rock_x_rover, rock_y_rover)
+        rock_idx = np.argmin(rock_dist)
+        rock_x, rock_y = rock_x_world[rock_idx], rock_y_world[rock_idx]
+        Rover.worldmap[rock_y, rock_x, 1] = 255
+
+    dists, angles = to_polar_coords(nav_x_rover, nav_y_rover)
+
+    # Update the Rover
+
+    Rover.worldmap[obs_y_world, obs_x_world, 0] += 1
+    Rover.worldmap[nav_y_world, nav_x_world, 2] += 10
+
+    Rover.vision_image[:, :, 0] = obs_warped * 255
+    Rover.vision_image[:, :, 1] = rock_warped * 255
+    Rover.vision_image[:, :, 2] = nav_warped * 255
     
-    
+    Rover.nav_angles = angles
+
     return Rover
+
