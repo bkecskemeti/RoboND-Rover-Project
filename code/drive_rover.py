@@ -39,7 +39,7 @@ ground_truth_3d = np.dstack((ground_truth*0, ground_truth*255, ground_truth*0)).
 class RoverState():
     def __init__(self):
         self.start_time = None # To record the start time of navigation
-        self.total_time = None # To record total duration of naviagation
+        self.total_time = 0    # To record total duration of naviagation
         self.img = None # Current camera image
         self.pos = None # Current position (x, y)
         self.yaw = None # Current yaw angle
@@ -77,6 +77,34 @@ class RoverState():
         self.near_sample = 0 # Will be set to telemetry value data["near_sample"]
         self.picking_up = 0 # Will be set to telemetry value data["picking_up"]
         self.send_pickup = False # Set to True to trigger rock pickup
+        
+        # Goal related fields
+        self.goal_faith = 0.5 # time until we keep believing the goal is there even if it is not seen currently
+        self.goal_last_seen = -2 * self.goal_faith # when was a goal last seen
+        self.goal_distance = -1.0   # distance of the closest visible goal
+        self.goal_angle = 0.0       # steering angle of the closest visible goal
+        
+        # Metrics for throttle and distance traveled, mainly used to figure out when the rover is stuck
+        self.metrics_window = 50    # metrics is calculated over this many frames
+        self.prev_time = 0          # previous time instant to calculate dt
+        self.d_distance = np.zeros(self.metrics_window, dtype = float)   # delta distance traveled 
+        self.d_velocity = np.zeros(self.metrics_window, dtype = float)   # delta velocity  
+
+        # Perturbation
+        self.perturb_max = 5
+        self.counter = 0
+
+    def step_metrics(self):
+        dt = self.total_time - self.prev_time
+        self.d_distance = np.roll(self.d_distance, 1)
+        self.d_velocity = np.roll(self.d_velocity, 1)
+        self.d_distance[0] = dt * abs(self.vel)
+        self.d_velocity[0] = dt * (self.throttle - self.brake)
+        self.prev_time = self.total_time
+
+    def is_stuck(self):
+        return (self.d_velocity.sum() > 0.2) and (self.d_distance.sum() < 0.1)
+
 # Initialize our rover 
 Rover = RoverState()
 

@@ -50,11 +50,14 @@ def update_rover(Rover, data):
       # Update number of rocks collected
       Rover.samples_collected = Rover.samples_to_find - np.int(data["sample_count"])
 
-      print('speed =',Rover.vel, 'position =', Rover.pos, 'throttle =', 
-      Rover.throttle, 'steer_angle =', Rover.steer, 'near_sample:', Rover.near_sample, 
-      'picking_up:', data["picking_up"], 'sending pickup:', Rover.send_pickup, 
-      'total time:', Rover.total_time, 'samples remaining:', data["sample_count"], 
-      'samples collected:', Rover.samples_collected)
+      # Update metrics
+      Rover.step_metrics()
+
+      print('mode =', Rover.mode,'speed =',Rover.vel, 'position =', Rover.pos, 'throttle =', 
+      Rover.throttle, 'steer_angle =', Rover.steer, 'near_sample =', Rover.near_sample, 
+      'picking_up = ', data["picking_up"], 'sending pickup =', Rover.send_pickup, 
+      'total time =', Rover.total_time, 'samples remaining =', data["sample_count"], 
+      'samples collected =', Rover.samples_collected, 'delta distance =', Rover.d_distance.sum(), 'delta velocity =', Rover.d_velocity.sum())
       # Get the current image from the center camera of the rover
       imgString = data["image"]
       image = Image.open(BytesIO(base64.b64decode(imgString)))

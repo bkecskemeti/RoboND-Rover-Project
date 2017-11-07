@@ -12,14 +12,20 @@ def decision_step(Rover):
     # Example:
     # Check if we have vision data to make decisions with
     if Rover.nav_angles is not None:
-        # Check for Rover.mode status
+
+        if Rover.is_stuck():
+            print('WE SEEM TO BE STUCK!')
+            Rover.mode = 'perturb'
+
         if Rover.mode == 'forward': 
+            # If a goal is identified ahead, switch mode
+            if Rover.total_time - Rover.goal_last_seen < Rover.goal_faith:
+                Rover.mode = 'approach'
             # Check the extent of navigable terrain
             if len(Rover.nav_angles) >= Rover.stop_forward:  
                 # If mode is forward, navigable terrain looks good 
                 # and velocity is below max, then throttle 
                 if Rover.vel < Rover.max_vel:
-                    # Set throttle value to throttle setting
                     Rover.throttle = Rover.throttle_set
                 else: # Else coast
                     Rover.throttle = 0
@@ -28,12 +34,64 @@ def decision_step(Rover):
                 Rover.steer = np.clip(np.mean(Rover.nav_angles * 180/np.pi), -15, 15)
             # If there's a lack of navigable terrain pixels then go to 'stop' mode
             elif len(Rover.nav_angles) < Rover.stop_forward:
+                Rover.throttle = 0
+                Rover.brake = Rover.brake_set
+                Rover.steer = 0
+                Rover.mode = 'stop'
+
+        # When we are approaching a goal, steer towards it and stop smoothly when reached
+        elif Rover.mode == 'approach':
+            # Check the extent of navigable terrain
+            if len(Rover.nav_angles) >= Rover.stop_forward:  
+
+                slow_dist = 20.0
+                stop_dist = 10.0
+
+                if Rover.total_time - Rover.goal_last_seen > Rover.goal_faith:
+                    # Give up if goal is not seen for a while
+                    Rover.throttle, Rover.brake, Rover.steer = 0, 0, 0
+                    Rover.mode = 'forward'
+                elif Rover.goal_distance < 0:
+                    # Otherwise, coast if goal is not seen for some reason at the moment
+                    Rover.throttle, Rover.brake, Rover.steer = 0, 0, 0
+                else:
+                    # If we see the goal, steer towards it and decrease velocity
+                    target_velocity = Rover.max_vel * (min(Rover.goal_distance, slow_dist) - stop_dist) / (slow_dist - stop_dist)
+
+                    if Rover.vel > target_velocity:
+                        Rover.throttle = 0
+                        Rover.brake = 2 * Rover.throttle_set
+                    else:
+                        Rover.throttle = Rover.throttle_set
+                        Rover.brake = 0
+
+                    if Rover.near_sample:
+                        Rover.throttle = 0
+                        Rover.brake = Rover.brake_set
+                    
+                    # Steer towards goal
+                    Rover.steer = Rover.goal_angle * 180/np.pi
+
+            # If there's a lack of navigable terrain pixels then go to 'stop' mode
+            elif len(Rover.nav_angles) < Rover.stop_forward:
                     # Set mode to "stop" and hit the brakes!
                     Rover.throttle = 0
                     # Set brake to stored brake value
                     Rover.brake = Rover.brake_set
                     Rover.steer = 0
                     Rover.mode = 'stop'
+
+        # Do some random turning if the rover is stuck
+        elif Rover.mode == 'perturb':
+            print('PERTURBING!', Rover.perturb_max)
+            Rover.throttle = 0
+            Rover.brake = Rover.brake_set if Rover.vel > 0.2 else 0
+            Rover.steer = -30
+            Rover.counter += 1
+            if Rover.counter >= Rover.perturb_max:
+                Rover.counter = 0
+                Rover.throttle = -2 * Rover.throttle_set
+                Rover.mode = 'forward'
 
         # If we're already in "stop" mode then make different decisions
         elif Rover.mode == 'stop':
@@ -60,6 +118,7 @@ def decision_step(Rover):
                     # Set steer to mean angle
                     Rover.steer = np.clip(np.mean(Rover.nav_angles * 180/np.pi), -15, 15)
                     Rover.mode = 'forward'
+
     # Just to make the rover do something 
     # even if no modifications have been made to the code
     else:

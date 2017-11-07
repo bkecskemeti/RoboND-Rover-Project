@@ -19,6 +19,11 @@ def rover_coords(binary_img):
     y_pixel = -(xpos - binary_img.shape[1]/2 ).astype(np.float)
     return x_pixel, y_pixel
 
+# The inverse of rover_coords
+def img_coords(img, x_pixel, y_pixel):
+    ypos = (img.shape[0] - x_pixel).astype(int)
+    xpos = (img.shape[1]/2 - y_pixel).astype(int)
+    return xpos, ypos
 
 # Define a function to convert to radial coords in rover space
 def to_polar_coords(x_pixel, y_pixel):
@@ -56,77 +61,95 @@ def pix_to_world(xpix, ypix, xpos, ypos, yaw, world_size, scale):
     # Apply translation
     xpix_tran, ypix_tran = translate_pix(xpix_rot, ypix_rot, xpos, ypos, scale)
     # Perform rotation, translation and clipping all at once
-    x_pix_world = np.clip(np.int_(xpix_tran), 0, world_size - 1)
-    y_pix_world = np.clip(np.int_(ypix_tran), 0, world_size - 1)
+    x_pix_world = np.clip(xpix_tran.astype(int), 0, world_size - 1)
+    y_pix_world = np.clip(ypix_tran.astype(int), 0, world_size - 1)
     # Return the result
     return x_pix_world, y_pix_world
 
 # Define a function to perform a perspective transform
-def perspect_transform(img, src, dst):
-           
+def perspect_transform(img, src, dst):    
     M = cv2.getPerspectiveTransform(src, dst)
     warped = cv2.warpPerspective(img, M, (img.shape[1], img.shape[0]))# keep same size as input image
-    
     return warped
 
-def get_transform(img, dst_size):
-    bottom_offset = 6
-    source = np.float32([[14, 140], [301 ,140],[200, 96], [118, 96]])
-    destination = np.float32([[img.shape[1]/2 - dst_size, img.shape[0] - bottom_offset],
-                              [img.shape[1]/2 + dst_size, img.shape[0] - bottom_offset],
-                              [img.shape[1]/2 + dst_size, img.shape[0] - 2*dst_size - bottom_offset], 
-                              [img.shape[1]/2 - dst_size, img.shape[0] - 2*dst_size - bottom_offset]])
-    return source, destination
+# Helper class to encompass information about the rover and the world
+class Perspective:
+    def __init__(self, xpos, ypos, yaw, world_size, dst_size, img_shape):
+        # position and orientation of the rover
+        self.xpos = xpos
+        self.ypos = ypos
+        self.yaw = yaw
+        # needed for transforming to world coordinates
+        self.world_size = world_size
+        self.scale = 2 * dst_size
+        # needed for perspective transform
+        bottom_offset = 6
+        self.source = np.float32([[14, 140], [301 ,140],[200, 96], [118, 96]])
+        self.destination = np.float32([[img_shape[1]/2 - dst_size, img_shape[0] - bottom_offset],
+                                       [img_shape[1]/2 + dst_size, img_shape[0] - bottom_offset],
+                                       [img_shape[1]/2 + dst_size, img_shape[0] - 2*dst_size - bottom_offset], 
+                                       [img_shape[1]/2 - dst_size, img_shape[0] - 2*dst_size - bottom_offset]])
+        # don't trust camera pixels too close to the horizon
+        self.trust_min_x, self.trust_max_x = 0.0, 70.0
+        self.trust_min_y, self.trust_max_y = -70.0, 70.0
+
+# Helper class to calculate information about a subset of the terrain
+class TerrainSet():
+    def __init__(self, persp, camera_thresh_img):
+        # apply transformation to rover coordinates
+        self.threshed = camera_thresh_img
+        self.x_rover, self.y_rover = rover_coords(perspect_transform(self.threshed, persp.source, persp.destination))
+        # clip points far away close to the horizon (they're too far anyway and they mess up fidelity)
+        self.x_rover = np.clip(self.x_rover.astype(int), persp.trust_min_x, persp.trust_max_x)
+        self.y_rover = np.clip(self.y_rover.astype(int), persp.trust_min_y, persp.trust_max_y)
+        x_img, y_img = img_coords(camera_thresh_img, self.x_rover, self.y_rover)
+        self.warped = np.zeros_like(camera_thresh_img)
+        self.warped[y_img, x_img] = 1
+        self.x_world, self.y_world = pix_to_world(self.x_rover, self.y_rover, persp.xpos, persp.ypos, persp.yaw, persp.world_size, persp.scale)
 
 # Apply the above functions in succession and update the Rover state accordingly
 def perception_step(Rover):
 
     img = Rover.img
+
+    dst_size = 5
+
+    rock_thresh_lo, rock_thresh_hi = (126, 106, 0), (255, 233, 84)
+    navigable_thresh_lo = (170, 170, 170)
+
+    persp = Perspective(xpos = Rover.pos[0], ypos = Rover.pos[1], yaw = Rover.yaw,
+                        world_size = Rover.worldmap.shape[0], dst_size = dst_size, img_shape = img.shape)
     
-    dst_size = 5 
-
-    world_size, scale = Rover.worldmap.shape[0], 2 * dst_size
-
-    source, destination = get_transform(img, dst_size)
-    
-    # Thresholds
-    rock_thresh_lo, rock_thresh_hi = (126, 106, 0), (255, 216, 84)
-    navigable_thresh_lo = (161, 161, 161)
-
     # Navigable terrain 
-    nav_thresh = color_thresh(img, lo=navigable_thresh_lo)
-    nav_warped = perspect_transform(nav_thresh, source, destination)
-    nav_x_rover, nav_y_rover = rover_coords(nav_warped)
-    nav_x_world, nav_y_world = pix_to_world(nav_x_rover, nav_y_rover, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
-       
+    nav_terrain = TerrainSet(persp, color_thresh(img, lo=navigable_thresh_lo))
+    
     # Obstacles 
-    obs_thresh = color_thresh(img, hi=navigable_thresh_lo)
-    obs_warped = perspect_transform(obs_thresh, source, destination)
-    obs_x_rover, obs_y_rover = rover_coords(obs_warped)
-    obs_x_world, obs_y_world = pix_to_world(obs_x_rover, obs_y_rover, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
+    obs_terrain = TerrainSet(persp, color_thresh(img, hi=navigable_thresh_lo))
 
     # Rock samples
-    rock_thresh = color_thresh(img, lo=rock_thresh_lo, hi=rock_thresh_hi)
-    rock_warped = perspect_transform(rock_thresh, source, destination)
-    rock_x_rover, rock_y_rover = rover_coords(rock_warped)
-    rock_x_world, rock_y_world = pix_to_world(rock_x_rover, rock_y_rover, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
+    rock_terrain = TerrainSet(persp, color_thresh(img, lo=rock_thresh_lo, hi=rock_thresh_hi))
 
-    if (rock_warped.any()):
-        rock_dist, rock_ang = to_polar_coords(rock_x_rover, rock_y_rover)
+    if (rock_terrain.warped.any()):
+        rock_dist, rock_ang = to_polar_coords(rock_terrain.x_rover, rock_terrain.y_rover)
         rock_idx = np.argmin(rock_dist)
-        rock_x, rock_y = rock_x_world[rock_idx], rock_y_world[rock_idx]
+        rock_x, rock_y = rock_terrain.x_world[rock_idx], rock_terrain.y_world[rock_idx]
+        Rover.goal_distance, Rover.goal_angle, Rover.goal_last_seen = rock_dist[rock_idx], rock_ang[rock_idx], Rover.total_time
         Rover.worldmap[rock_y, rock_x, 1] = 255
+        print("ROCK IS IN SIGHT!", Rover.goal_distance, Rover.goal_angle)
+    else:
+        Rover.goal_distance, Rover.goal_angle = -1.0, 0.0
+        print("CANT SEE ROCK!")
 
-    dists, angles = to_polar_coords(nav_x_rover, nav_y_rover)
+    dists, angles = to_polar_coords(nav_terrain.x_rover, nav_terrain.y_rover)
 
     # Update the Rover
 
-    Rover.worldmap[obs_y_world, obs_x_world, 0] += 1
-    Rover.worldmap[nav_y_world, nav_x_world, 2] += 10
+    Rover.worldmap[obs_terrain.y_world, obs_terrain.x_world, 0] += 1
+    Rover.worldmap[nav_terrain.y_world, nav_terrain.x_world, 2] += 10
 
-    Rover.vision_image[:, :, 0] = obs_warped * 255
-    Rover.vision_image[:, :, 1] = rock_warped * 255
-    Rover.vision_image[:, :, 2] = nav_warped * 255
+    Rover.vision_image[:, :, 0] = obs_terrain.warped * 255
+    Rover.vision_image[:, :, 1] = rock_terrain.warped * 255
+    Rover.vision_image[:, :, 2] = nav_terrain.warped * 255
     
     Rover.nav_angles = angles
 
