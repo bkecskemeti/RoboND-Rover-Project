@@ -1,5 +1,7 @@
 import numpy as np
 import cv2
+from supporting_functions import get_coords
+from supporting_functions import to_polar_coords
 
 # Identify pixels above and/or below given thresholds
 def color_thresh(img, lo=(0, 0, 0), hi=(255, 255, 255)):
@@ -24,16 +26,6 @@ def img_coords(img, x_pixel, y_pixel):
     ypos = (img.shape[0] - x_pixel).astype(int)
     xpos = (img.shape[1]/2 - y_pixel).astype(int)
     return xpos, ypos
-
-# Define a function to convert to radial coords in rover space
-def to_polar_coords(x_pixel, y_pixel):
-    # Convert (x_pixel, y_pixel) to (distance, angle) 
-    # in polar coordinates in rover space
-    # Calculate distance to each pixel
-    dist = np.sqrt(x_pixel**2 + y_pixel**2)
-    # Calculate angle away from vertical for each pixel
-    angles = np.arctan2(y_pixel, x_pixel)
-    return dist, angles
 
 # Define a function to map rover space pixels to world space
 def rotate_pix(xpix, ypix, yaw):
@@ -89,8 +81,9 @@ class Perspective:
                                        [img_shape[1]/2 + dst_size, img_shape[0] - 2*dst_size - bottom_offset], 
                                        [img_shape[1]/2 - dst_size, img_shape[0] - 2*dst_size - bottom_offset]])
         # don't trust camera pixels too close to the horizon
-        self.trust_min_x, self.trust_max_x = 0.0, 70.0
-        self.trust_min_y, self.trust_max_y = -70.0, 70.0
+        self.trust_area = ((0.0, -70.0), (70.0, 70))
+        # we will use this enlarged box to keep track of unexplored areas 
+        self.mask_area = ((-10.0, -90.0), (80.0, 90))
 
 # Helper class to calculate information about a subset of the terrain
 class TerrainSet():
@@ -99,12 +92,20 @@ class TerrainSet():
         self.threshed = camera_thresh_img
         self.x_rover, self.y_rover = rover_coords(perspect_transform(self.threshed, persp.source, persp.destination))
         # clip points far away close to the horizon (they're too far anyway and they mess up fidelity)
-        self.x_rover = np.clip(self.x_rover.astype(int), persp.trust_min_x, persp.trust_max_x)
-        self.y_rover = np.clip(self.y_rover.astype(int), persp.trust_min_y, persp.trust_max_y)
+        self.x_rover = np.clip(self.x_rover.astype(int), persp.trust_area[0][0], persp.trust_area[1][0])
+        self.y_rover = np.clip(self.y_rover.astype(int), persp.trust_area[0][1], persp.trust_area[1][1])
         self.x_img, self.y_img = img_coords(camera_thresh_img, self.x_rover, self.y_rover)
         self.warped = np.zeros_like(camera_thresh_img)
         self.warped[self.y_img, self.x_img] = 1
         self.x_world, self.y_world = pix_to_world(self.x_rover, self.y_rover, persp.xpos, persp.ypos, persp.yaw, persp.world_size, persp.scale)
+
+# Helper class to calculate a mask over a given area relative to the rover
+class TerrainMask():
+    def __init__(self, persp, rover_area):
+        self.x_rover, self.y_rover = get_coords(rover_area, 1.0)
+        self.x_world, self.y_world = pix_to_world(self.x_rover, self.y_rover,
+                                                  persp.xpos, persp.ypos, persp.yaw,
+                                                  persp.world_size, persp.scale)
 
 # Apply the above functions in succession and update the Rover state accordingly
 def perception_step(Rover):
@@ -139,14 +140,17 @@ def perception_step(Rover):
         Rover.goal_distance, Rover.goal_angle = -1.0, 0.0
         print("CANT SEE ROCK!")
 
-    # Use memory to calculate which areas were not visited yet
-    unknown_rover = np.zeros_like(nav_terrain.warped)
-    unknown_rover[nav_terrain.y_img, nav_terrain.x_img] = np.isclose(Rover.memory[nav_terrain.x_world, nav_terrain.y_world], 0.0)
-    unknown_x_rover, unknown_y_rover = rover_coords(unknown_rover)
+    # Calculate unexplored area
+    # These masks are used to get a small unexplored area around the current view, to reduce the number of points in the graph.
+    current_view = TerrainSet(persp, np.ones_like(img[:,:,0]))
+    extended_view = TerrainMask(persp, persp.mask_area)
+
+    Rover.explored[current_view.y_world, current_view.x_world] = 1
+    Rover.unexplored[extended_view.y_world, extended_view.x_world] = 1
+    Rover.unexplored = (Rover.unexplored > 0) & (Rover.explored == 0)
 
     # Polar coordinates for decision step
     dists, angles = to_polar_coords(nav_terrain.x_rover, nav_terrain.y_rover)
-    unknown_dists, unknown_angles = to_polar_coords(unknown_x_rover, unknown_y_rover)
 
     # Update the Rover worldmap
     Rover.worldmap[obs_terrain.y_world, obs_terrain.x_world, 0] += 1
@@ -155,11 +159,10 @@ def perception_step(Rover):
     # Update image to be displayed o the side
     Rover.vision_image[:, :, 0] = obs_terrain.warped * 255
     Rover.vision_image[:, :, 1] = rock_terrain.warped * 255
-    Rover.vision_image[:, :, 2] = nav_terrain.warped * 127 + unknown_rover * 128
+    Rover.vision_image[:, :, 2] = nav_terrain.warped * 255
     
     # Output for decision step
     Rover.nav_angles = angles
-    Rover.unknown_angles = unknown_angles
 
     return Rover
 

@@ -5,6 +5,28 @@ from io import BytesIO, StringIO
 import base64
 import time
 
+# Return cartesian product of the given vectors
+def cartesian_product(*arrays):
+    la = len(arrays)
+    dtype = np.result_type(*arrays)
+    arr = np.empty([len(a) for a in arrays] + [la], dtype=dtype)
+    for i, a in enumerate(np.ix_(*arrays)):
+        arr[...,i] = a
+    return arr.reshape(-1, la)
+
+# get all the points within an area with a given granularity
+def get_coords(area, gran):
+    xs = np.arange(area[0][0], area[1][0], gran, dtype=float)
+    ys = np.arange(area[0][1], area[1][1], gran, dtype=float)
+    coords = np.transpose(cartesian_product(xs, ys))
+    return coords[0], coords[1]
+
+# Define a function to convert to radial coords in rover space
+def to_polar_coords(x_pixel, y_pixel):
+    dist = np.sqrt(x_pixel**2 + y_pixel**2)
+    angles = np.arctan2(y_pixel, x_pixel)
+    return dist, angles
+
 # Define a function to convert telemetry strings to float independent of decimal convention
 def convert_to_float(string_to_convert):
       if ',' in string_to_convert:
@@ -51,8 +73,6 @@ def update_rover(Rover, data):
       Rover.samples_collected = Rover.samples_to_find - np.int(data["sample_count"])
       # Update metrics for distance and velocity
       Rover.step_metrics()
-      # Update memory of already visited areas
-      Rover.step_memory()
 
       print('mode =', Rover.mode,'speed =',Rover.vel, 'position =', Rover.pos, 'throttle =', 
       Rover.throttle, 'steer_angle =', Rover.steer, 'near_sample =', Rover.near_sample, 

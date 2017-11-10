@@ -24,13 +24,8 @@ def decision_step(Rover):
                 Rover.mode = 'approach'
             
             else:
-                # Calculate target angle if area ahead looks good
-                # Prefer unexplored areas, if not enough, then any navigable
-                target_angles = None
-                if (Rover.unknown_angles is not None) and (len(Rover.unknown_angles) >= Rover.stop_forward):
-                    target_angles = Rover.unknown_angles
-                elif len(Rover.nav_angles) >= Rover.stop_forward:
-                    target_angles = Rover.nav_angles
+                # Calculate target to steer towards
+                target_angles = Rover.nav_angles
 
                 if target_angles is not None:
                     # When velocity is below max, then throttle, else coast
