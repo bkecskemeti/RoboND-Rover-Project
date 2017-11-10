@@ -49,9 +49,10 @@ def update_rover(Rover, data):
       Rover.picking_up = np.int(data["picking_up"])
       # Update number of rocks collected
       Rover.samples_collected = Rover.samples_to_find - np.int(data["sample_count"])
-
-      # Update metrics
+      # Update metrics for distance and velocity
       Rover.step_metrics()
+      # Update memory of already visited areas
+      Rover.step_memory()
 
       print('mode =', Rover.mode,'speed =',Rover.vel, 'position =', Rover.pos, 'throttle =', 
       Rover.throttle, 'steer_angle =', Rover.steer, 'near_sample =', Rover.near_sample, 

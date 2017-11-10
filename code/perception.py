@@ -52,7 +52,6 @@ def translate_pix(xpix_rot, ypix_rot, xpos, ypos, scale):
     # Return the result  
     return xpix_translated, ypix_translated
 
-
 # Define a function to apply rotation and translation (and clipping)
 # Once you define the two functions above this function should work
 def pix_to_world(xpix, ypix, xpos, ypos, yaw, world_size, scale):
@@ -102,9 +101,9 @@ class TerrainSet():
         # clip points far away close to the horizon (they're too far anyway and they mess up fidelity)
         self.x_rover = np.clip(self.x_rover.astype(int), persp.trust_min_x, persp.trust_max_x)
         self.y_rover = np.clip(self.y_rover.astype(int), persp.trust_min_y, persp.trust_max_y)
-        x_img, y_img = img_coords(camera_thresh_img, self.x_rover, self.y_rover)
+        self.x_img, self.y_img = img_coords(camera_thresh_img, self.x_rover, self.y_rover)
         self.warped = np.zeros_like(camera_thresh_img)
-        self.warped[y_img, x_img] = 1
+        self.warped[self.y_img, self.x_img] = 1
         self.x_world, self.y_world = pix_to_world(self.x_rover, self.y_rover, persp.xpos, persp.ypos, persp.yaw, persp.world_size, persp.scale)
 
 # Apply the above functions in succession and update the Rover state accordingly
@@ -127,7 +126,7 @@ def perception_step(Rover):
     obs_terrain = TerrainSet(persp, color_thresh(img, hi=navigable_thresh_lo))
 
     # Rock samples
-    rock_terrain = TerrainSet(persp, color_thresh(img, lo=rock_thresh_lo, hi=rock_thresh_hi))
+    rock_terrain = TerrainSet(persp, color_thresh(img, lo=rock_thresh_lo, hi=rock_thresh_hi)) 
 
     if (rock_terrain.warped.any()):
         rock_dist, rock_ang = to_polar_coords(rock_terrain.x_rover, rock_terrain.y_rover)
@@ -140,18 +139,27 @@ def perception_step(Rover):
         Rover.goal_distance, Rover.goal_angle = -1.0, 0.0
         print("CANT SEE ROCK!")
 
+    # Use memory to calculate which areas were not visited yet
+    unknown_rover = np.zeros_like(nav_terrain.warped)
+    unknown_rover[nav_terrain.y_img, nav_terrain.x_img] = np.isclose(Rover.memory[nav_terrain.x_world, nav_terrain.y_world], 0.0)
+    unknown_x_rover, unknown_y_rover = rover_coords(unknown_rover)
+
+    # Polar coordinates for decision step
     dists, angles = to_polar_coords(nav_terrain.x_rover, nav_terrain.y_rover)
+    unknown_dists, unknown_angles = to_polar_coords(unknown_x_rover, unknown_y_rover)
 
-    # Update the Rover
-
+    # Update the Rover worldmap
     Rover.worldmap[obs_terrain.y_world, obs_terrain.x_world, 0] += 1
     Rover.worldmap[nav_terrain.y_world, nav_terrain.x_world, 2] += 10
 
+    # Update image to be displayed o the side
     Rover.vision_image[:, :, 0] = obs_terrain.warped * 255
     Rover.vision_image[:, :, 1] = rock_terrain.warped * 255
-    Rover.vision_image[:, :, 2] = nav_terrain.warped * 255
+    Rover.vision_image[:, :, 2] = nav_terrain.warped * 127 + unknown_rover * 128
     
+    # Output for decision step
     Rover.nav_angles = angles
+    Rover.unknown_angles = unknown_angles
 
     return Rover
 

@@ -50,6 +50,7 @@ class RoverState():
         self.throttle = 0 # Current throttle value
         self.brake = 0 # Current brake value
         self.nav_angles = None # Angles of navigable terrain pixels
+        self.unknown_angles = None # Angles of navigable terrain pixels that the rover does not remember visiting
         self.nav_dists = None # Distances of navigable terrain pixels
         self.ground_truth = ground_truth_3d # Ground truth worldmap
         self.mode = 'forward' # Current mode (can be forward or stop)
@@ -94,6 +95,9 @@ class RoverState():
         self.perturb_max = 5
         self.counter = 0
 
+        # Memory of already explored areas
+        self.memory = np.zeros_like(self.ground_truth[:,:,0]).astype(np.float)
+
     def step_metrics(self):
         dt = self.total_time - self.prev_time
         self.d_distance = np.roll(self.d_distance, 1)
@@ -101,6 +105,11 @@ class RoverState():
         self.d_distance[0] = dt * abs(self.vel)
         self.d_velocity[0] = dt * (self.throttle - self.brake)
         self.prev_time = self.total_time
+
+    def step_memory(self):
+        # Update memory of already explored areas, record current point, and make memory fade a little
+        self.memory[int(self.pos[1]), int(self.pos[0])] = 255
+        self.memory[:, :] = np.clip(self.memory[:,:] - 0.01, 0, 255)
 
     def is_stuck(self):
         return (self.d_velocity.sum() > 0.2) and (self.d_distance.sum() < 0.1)

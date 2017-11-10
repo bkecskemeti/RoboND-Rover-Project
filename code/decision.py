@@ -18,29 +18,36 @@ def decision_step(Rover):
             Rover.mode = 'perturb'
 
         if Rover.mode == 'forward': 
-            # If a goal is identified ahead, switch mode
+            
             if Rover.total_time - Rover.goal_last_seen < Rover.goal_faith:
+                # If a goal is believed to lie ahead, switch mode
                 Rover.mode = 'approach'
-            # Check the extent of navigable terrain
-            if len(Rover.nav_angles) >= Rover.stop_forward:  
-                # If mode is forward, navigable terrain looks good 
-                # and velocity is below max, then throttle 
-                if Rover.vel < Rover.max_vel:
-                    Rover.throttle = Rover.throttle_set
-                else: # Else coast
+            
+            else:
+                # Calculate target angle if area ahead looks good
+                # Prefer unexplored areas, if not enough, then any navigable
+                target_angles = None
+                if (Rover.unknown_angles is not None) and (len(Rover.unknown_angles) >= Rover.stop_forward):
+                    target_angles = Rover.unknown_angles
+                elif len(Rover.nav_angles) >= Rover.stop_forward:
+                    target_angles = Rover.nav_angles
+
+                if target_angles is not None:
+                    # When velocity is below max, then throttle, else coast
+                    # Steer to average angle clipped to the range +/- 15
+                    Rover.throttle = Rover.throttle_set if Rover.vel < Rover.max_vel else 0
+                    Rover.steer = np.clip(np.mean(target_angles * 180/np.pi), -15, 15)            
+                    Rover.brake = 0  
+                else:
+                    # If not enough navigable pixels ahead, change to stop mode
                     Rover.throttle = 0
-                Rover.brake = 0
-                # Set steering to average angle clipped to the range +/- 15
-                Rover.steer = np.clip(np.mean(Rover.nav_angles * 180/np.pi), -15, 15)
-            # If there's a lack of navigable terrain pixels then go to 'stop' mode
-            elif len(Rover.nav_angles) < Rover.stop_forward:
-                Rover.throttle = 0
-                Rover.brake = Rover.brake_set
-                Rover.steer = 0
-                Rover.mode = 'stop'
+                    Rover.brake = Rover.brake_set
+                    Rover.steer = 0
+                    Rover.mode = 'stop'
 
         # When we are approaching a goal, steer towards it and stop smoothly when reached
         elif Rover.mode == 'approach':
+            
             # Check the extent of navigable terrain
             if len(Rover.nav_angles) >= Rover.stop_forward:  
 
@@ -76,7 +83,6 @@ def decision_step(Rover):
             elif len(Rover.nav_angles) < Rover.stop_forward:
                     # Set mode to "stop" and hit the brakes!
                     Rover.throttle = 0
-                    # Set brake to stored brake value
                     Rover.brake = Rover.brake_set
                     Rover.steer = 0
                     Rover.mode = 'stop'
