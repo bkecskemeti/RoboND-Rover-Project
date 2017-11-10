@@ -98,6 +98,9 @@ class RoverState():
         self.explored = np.zeros_like(self.ground_truth[:,:,0]).astype(np.float)
         self.unexplored = np.zeros_like(self.ground_truth[:,:,0]).astype(np.float)
 
+        # Planned path
+        self.follow_path = None
+
     def step_metrics(self):
         dt = self.total_time - self.prev_time
         self.d_distance = np.roll(self.d_distance, 1)

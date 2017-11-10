@@ -17,6 +17,7 @@ def decision_step(Rover):
             print('WE SEEM TO BE STUCK!')
             Rover.mode = 'perturb'
 
+        # Drive forward towards the mean navigable angle
         if Rover.mode == 'forward': 
             
             if Rover.total_time - Rover.goal_last_seen < Rover.goal_faith:
@@ -39,6 +40,10 @@ def decision_step(Rover):
                     Rover.brake = Rover.brake_set
                     Rover.steer = 0
                     Rover.mode = 'stop'
+
+        # Follow a given path
+        elif Rover.mode = 'path':
+            
 
         # When we are approaching a goal, steer towards it and stop smoothly when reached
         elif Rover.mode == 'approach':

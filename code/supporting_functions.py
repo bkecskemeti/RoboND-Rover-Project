@@ -27,6 +27,15 @@ def to_polar_coords(x_pixel, y_pixel):
     angles = np.arctan2(y_pixel, x_pixel)
     return dist, angles
 
+# return the closest point to a given point
+def closest_point_idx(pointset, p):
+    return np.argmin(np.sum((pointset - p)**2, axis=1))
+
+# return points closer than a given distance
+def neighbourhood(pointset, p, d):
+    dist_2, d_2 = np.sum((pointset - p)**2, axis=1), d**2
+    return np.nonzero(dist_2 < d_2)
+
 # Define a function to convert telemetry strings to float independent of decimal convention
 def convert_to_float(string_to_convert):
       if ',' in string_to_convert:
