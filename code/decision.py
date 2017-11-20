@@ -80,8 +80,8 @@ def decision_step(Rover):
 
     elif Rover.mode == 'approach':
         # When we are approaching a goal, steer towards it and stop smoothly when reached
-        slow_dist = 20.0
-        stop_dist = 10.0
+        slow_dist = 15.0
+        stop_dist = 8.0
 
         if Rover.total_time - Rover.goal_last_seen > Rover.goal_faith:
             # Give up if goal is not seen for a while
@@ -120,7 +120,7 @@ def decision_step(Rover):
             Rover.steer = 0
         else:
             Rover.throttle = 0
-            Rover.brake = Rover.brake_set
+            Rover.brake = Rover.brake_set if abs(Rover.vel) > 0.1  else 0
             Rover.steer = 30 * Rover.perturb_turn_direction
 
     elif Rover.mode == 'stop':
@@ -153,7 +153,6 @@ def decision_step(Rover):
 def try_plan(Rover):
     if (Rover.follow_path is None) or len(Rover.follow_path) == 0:
         # Find the shortest path in the world map from the current position to a selected goal
-
         current_pos = np.array(Rover.pos, dtype=float)
 
         # Construct graph

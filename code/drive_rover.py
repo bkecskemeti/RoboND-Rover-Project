@@ -156,7 +156,7 @@ class RoverState():
         if self.mode != to_mode:   
             if to_mode == 'perturb':
                 self.perturb_start = self.total_time
-                self.perturb_turn_time = random.uniform(0.0, self.perturb_max_time)
+                self.perturb_turn_time = 2 * random.uniform(0.0, self.perturb_max_time)
                 self.perturb_back_time = random.uniform(0.0, self.perturb_max_time)
                 self.perturb_turn_direction = 1 if random.randint(0,1) else -1
 
