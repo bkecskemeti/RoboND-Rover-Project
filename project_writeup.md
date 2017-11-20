@@ -19,7 +19,7 @@ The plot below shows navigable terrain, obstacles, and rocks:
 * row 2 - thresholded images
 * row 3 - perpective transform to map
 
-![Image analysis example][./output/warped_threshed_fig.jpg]
+![Image analysis example](./output/warped_threshed_fig.jpg)
 
 Color thresholds for rocks were identified from 6 sample images obtained
 manually, see: `/calibration_images/rock{1-6}_pixels.png`
@@ -66,7 +66,7 @@ This is how one frame of the final image looks:
 * map overlaid to ground truth
 * Rover worldmap: obstacles (red), unexplored (blue), navigable (green)
 
-![Example frame][./output/test_image_writeup.jpg]
+![Example frame](./output/test_image_writeup.jpg)
 
 #### 4. Path planning
 
@@ -74,7 +74,7 @@ I use the Dijksra algorithm from the scipy package to calculate the shortest pat
 two points in the Rover's worldmap. The graph is defined as the nodes given by the navigable
 and unexplored points, with edge weights between adjacent pixels given by the Manhattan distance.
 
-![Example shortest path][./output/dijkstra.png]
+![Example shortest path](./output/dijkstra.png)
 
 I know this is very rudimentary, as the Rover is moving continuously and such paths are therefore
 quite unnatural (involve unnecessary sharp turns).
