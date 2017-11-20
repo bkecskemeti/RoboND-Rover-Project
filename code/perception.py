@@ -18,7 +18,7 @@ def rover_coords(binary_img):
     # Calculate pixel positions with reference to the rover position being at the 
     # center bottom of the image.  
     x_pixel = -(ypos - binary_img.shape[0]).astype(np.float)
-    y_pixel = -(xpos - binary_img.shape[1]/2 ).astype(np.float)
+    y_pixel = -(xpos - binary_img.shape[1]/2).astype(np.float)
     return x_pixel, y_pixel
 
 # The inverse of rover_coords
@@ -60,7 +60,7 @@ def pix_to_world(xpix, ypix, xpos, ypos, yaw, world_size, scale):
 # Define a function to perform a perspective transform
 def perspect_transform(img, src, dst):    
     M = cv2.getPerspectiveTransform(src, dst)
-    warped = cv2.warpPerspective(img, M, (img.shape[1], img.shape[0]))# keep same size as input image
+    warped = cv2.warpPerspective(img, M, (img.shape[1], img.shape[0])) # keep same size as input image
     return warped
 
 # Helper class to encompass information about the rover and the world
@@ -135,22 +135,27 @@ def perception_step(Rover):
         rock_x, rock_y = rock_terrain.x_world[rock_idx], rock_terrain.y_world[rock_idx]
         Rover.goal_distance, Rover.goal_angle, Rover.goal_last_seen = rock_dist[rock_idx], rock_ang[rock_idx], Rover.total_time
         Rover.worldmap[rock_y, rock_x, 1] = 255
+        Rover.add_goal(np.array([rock_x, rock_y], dtype=float))
         print("ROCK IS IN SIGHT!", Rover.goal_distance, Rover.goal_angle)
     else:
         Rover.goal_distance, Rover.goal_angle = -1.0, 0.0
         print("CANT SEE ROCK!")
 
     # Calculate unexplored area
-    # These masks are used to get a small unexplored area around the current view, to reduce the number of points in the graph.
+    # These masks are used to get a small unexplored area around the current view, to reduce the number of points in the distance graph
     current_view = TerrainSet(persp, np.ones_like(img[:,:,0]))
     extended_view = TerrainMask(persp, persp.mask_area)
 
-    Rover.explored[current_view.y_world, current_view.x_world] = 1
-    Rover.unexplored[extended_view.y_world, extended_view.x_world] = 1
+    Rover.explored[current_view.x_world, current_view.y_world] = 1
+    Rover.unexplored[extended_view.x_world, extended_view.y_world] = 1
     Rover.unexplored = (Rover.unexplored > 0) & (Rover.explored == 0)
+    Rover.navigable[nav_terrain.x_world, nav_terrain.y_world] += 4
+    Rover.navigable[obs_terrain.x_world, obs_terrain.y_world] -= 1
 
     # Polar coordinates for decision step
     dists, angles = to_polar_coords(nav_terrain.x_rover, nav_terrain.y_rover)
+    obs_dists, obs_angles = to_polar_coords(obs_terrain.x_rover, obs_terrain.y_rover)
+    obs_angles_ahead = obs_angles[np.nonzero(obs_dists < 10.0)]
 
     # Update the Rover worldmap
     Rover.worldmap[obs_terrain.y_world, obs_terrain.x_world, 0] += 1
@@ -162,7 +167,7 @@ def perception_step(Rover):
     Rover.vision_image[:, :, 2] = nav_terrain.warped * 255
     
     # Output for decision step
-    Rover.nav_angles = angles
+    Rover.nav_angles = np.setdiff1d(angles, obs_angles_ahead)
 
     return Rover
 

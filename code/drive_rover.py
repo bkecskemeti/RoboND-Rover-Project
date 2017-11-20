@@ -16,11 +16,12 @@ import json
 import pickle
 import matplotlib.image as mpimg
 import time
+import random
 
 # Import functions for perception and decision making
 from perception import perception_step
 from decision import decision_step
-from supporting_functions import update_rover, create_output_images
+from supporting_functions import update_rover, create_output_images, closest_point_idx
 # Initialize socketio server and Flask application 
 # (learn more at: https://python-socketio.readthedocs.io/en/latest/)
 sio = socketio.Server()
@@ -49,10 +50,9 @@ class RoverState():
         self.steer = 0 # Current steering angle
         self.throttle = 0 # Current throttle value
         self.brake = 0 # Current brake value
+        self.mode = None # Current mode
         self.nav_angles = None # Angles of navigable terrain pixels
-        self.nav_dists = None # Distances of navigable terrain pixels
         self.ground_truth = ground_truth_3d # Ground truth worldmap
-        self.mode = 'forward' # Current mode (can be forward or stop)
         self.throttle_set = 0.2 # Throttle setting when accelerating
         self.brake_set = 10 # Brake setting when braking
         # The stop_forward and go_forward fields below represent total count
@@ -79,10 +79,12 @@ class RoverState():
         self.send_pickup = False # Set to True to trigger rock pickup
         
         # Goal related fields
-        self.goal_faith = 0.5 # time until we keep believing the goal is there even if it is not seen currently
+        self.goal_faith = 1.0       # time until we keep believing the goal is there even if it is not seen currently
         self.goal_last_seen = -2 * self.goal_faith # when was a goal last seen
         self.goal_distance = -1.0   # distance of the closest visible goal
         self.goal_angle = 0.0       # steering angle of the closest visible goal
+        self.goals = []             # store goals
+        self.goals_reached = []     # boolean array of which goals are reached
         
         # Metrics for throttle and distance traveled, mainly used to figure out when the rover is stuck
         self.metrics_window = 50    # metrics is calculated over this many frames
@@ -91,15 +93,49 @@ class RoverState():
         self.d_velocity = np.zeros(self.metrics_window, dtype = float)   # delta velocity  
 
         # Perturbation
-        self.perturb_max = 5
-        self.counter = 0
+        self.perturb_max_time = 2.0
+        self.perturb_turn_time = None
+        self.perturb_back_time = None
+        self.perturb_start = None
+        self.perturb_turn_direction = None
 
         # Internal map of explored and unexplored areas
-        self.explored = np.zeros_like(self.ground_truth[:,:,0]).astype(np.float)
-        self.unexplored = np.zeros_like(self.ground_truth[:,:,0]).astype(np.float)
+        self.explored =  np.zeros((200, 200), dtype=np.float)
+        self.unexplored = np.zeros((200, 200), dtype=np.float)
+        self.navigable = np.zeros((200, 200), dtype=np.float)
 
         # Planned path
+        self.start_pos = None
         self.follow_path = None
+        self.wander_start = None
+
+        self.switch_mode('forward')
+
+    # Get the goal if there's one close enough, otherwise None
+    def get_goal(self, goal):
+        if len(self.goals) == 0:
+            return None
+        else:
+            closest_goal = self.goals[closest_point_idx(self.goals, goal)]
+            # max distance set to 8.0 as rock locations are quite inaccurate
+            return closest_goal if np.sum((closest_goal - goal)**2) < 64.0 else None
+
+    # Add the goal if doesn't exist already
+    def add_goal(self, goal):
+        if self.get_goal(goal) is None:
+            self.goals.insert(0, goal)
+            self.goals_reached.insert(0, False)
+
+    # Set the goal as reached
+    def set_reached(self, goal):
+        if self.get_goal(goal) is not None:
+            self.goals_reached[closest_point_idx(self.goals, goal)] = True
+
+    def get_first_non_reached_goal(self):
+        for idx in xrange(len(self.goals_reached)):
+            if not self.goals_reached[idx]:
+                return self.goals[idx]
+        return None
 
     def step_metrics(self):
         dt = self.total_time - self.prev_time
@@ -110,7 +146,26 @@ class RoverState():
         self.prev_time = self.total_time
 
     def is_stuck(self):
-        return (self.d_velocity.sum() > 0.2) and (self.d_distance.sum() < 0.1)
+        return (self.d_velocity.sum() > 0.2) and (self.d_distance.sum() < 0.08)
+
+    def mission_completed(self):
+        return (self.samples_collected == self.samples_to_find) and np.sum((self.pos - self.start_pos)**2, axis=1) < 3.0
+
+    # switch to given mode and manage mode setup
+    def switch_mode(self, to_mode):
+        if self.mode != to_mode:   
+            if to_mode == 'perturb':
+                self.perturb_start = self.total_time
+                self.perturb_turn_time = random.uniform(0.0, self.perturb_max_time)
+                self.perturb_back_time = random.uniform(0.0, self.perturb_max_time)
+                self.perturb_turn_direction = 1 if random.randint(0,1) else -1
+
+            self.wander_start = self.total_time if to_mode == 'forward' else None
+
+            if to_mode != 'path':
+                self.follow_path = None
+
+            self.mode = to_mode
 
 # Initialize our rover 
 Rover = RoverState()

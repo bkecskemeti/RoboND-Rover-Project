@@ -31,10 +31,27 @@ def to_polar_coords(x_pixel, y_pixel):
 def closest_point_idx(pointset, p):
     return np.argmin(np.sum((pointset - p)**2, axis=1))
 
+def closest_element(possible_elements, target_element):
+    idx = np.argmin(abs(possible_elements - target_element), axis=0)
+    return possible_elements[idx]
+
 # return points closer than a given distance
 def neighbourhood(pointset, p, d):
     dist_2, d_2 = np.sum((pointset - p)**2, axis=1), d**2
     return np.nonzero(dist_2 < d_2)
+
+# return path given the result of dijskra
+def get_path(points, src, dst, predecessors):
+    path = []
+    idx = dst
+    while (idx != src) and (idx > 0):
+        path.insert(0, points[idx])
+        idx = predecessors[idx]
+    if (idx > 0):
+        path.insert(0, points[idx])
+        return path
+    else:
+        return None
 
 # Define a function to convert telemetry strings to float independent of decimal convention
 def convert_to_float(string_to_convert):
@@ -58,6 +75,7 @@ def update_rover(Rover, data):
             tot_time = time.time() - Rover.start_time
             if np.isfinite(tot_time):
                   Rover.total_time = tot_time
+
       # Print out the fields in the telemetry data dictionary
       print(data.keys())
       # The current speed of the rover in m/s
@@ -83,11 +101,15 @@ def update_rover(Rover, data):
       # Update metrics for distance and velocity
       Rover.step_metrics()
 
+      if Rover.start_pos is None:
+            Rover.start_pos = Rover.pos
+
       print('mode =', Rover.mode,'speed =',Rover.vel, 'position =', Rover.pos, 'throttle =', 
-      Rover.throttle, 'steer_angle =', Rover.steer, 'near_sample =', Rover.near_sample, 
+      Rover.throttle, 'steer_angle =', Rover.steer, 'brake =', Rover.brake, 'near_sample =', Rover.near_sample, 
       'picking_up = ', data["picking_up"], 'sending pickup =', Rover.send_pickup, 
       'total time =', Rover.total_time, 'samples remaining =', data["sample_count"], 
-      'samples collected =', Rover.samples_collected, 'delta distance =', Rover.d_distance.sum(), 'delta velocity =', Rover.d_velocity.sum())
+      'samples collected =', Rover.samples_collected, 'goals =', Rover.goals, 'goals_reached =', Rover.goals_reached,
+      'd_velocity=', Rover.d_velocity.sum(), 'd_distance=', Rover.d_distance.sum())
       # Get the current image from the center camera of the rover
       imgString = data["image"]
       image = Image.open(BytesIO(base64.b64decode(imgString)))
